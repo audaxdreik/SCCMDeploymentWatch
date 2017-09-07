@@ -60,23 +60,23 @@ class SCCMDeploymentStats {
 
 <#
 .SYNOPSIS
-Returns string array of currently watched SCCM deployments.
+Returns an array of strings for the currently watched SCCM deployments.
 .DESCRIPTION
 Gets the contents of C:\Users\[USERNAME]\Documents\WindowsPowerShell\SCCMWatch.dat indicating all of the Applications
 or Software Update Groups you are currently watching.
 .EXAMPLE
 PS C:\> Get-SCCMApplicationDeploymentWatch
 
-Returns an array of the contents of SCCMWatch.dat which can be fed into some of the other functions.
+Returns the contents of SCCMWatch.dat which can be fed into some of the other functions.
 .NOTES
 Just a simple wrapper/helper function.
 #>
-function Get-SCCMApplicationDeploymentWatchList {
+function Get-SCCMDeploymentWatchList {
     [CmdletBinding()]
-    [OutputType([array])]
+    [OutputType([System.Collections.ArrayList])]
     param ()
 
-    [array](Get-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat)
+    , [System.Collections.ArrayList]@(Get-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat)
 
 }
 
@@ -92,11 +92,12 @@ The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
 PS C:\> Add-SCCMApplicationDeploymentWatch -Application 'WKS - Java 8 Update 131'
 
+
 .NOTES
 Non-valid Applications or Software Update Groups do not cause any actual harm but should eventually be handled
 as they can increase query time.
 #>
-function Add-SCCMApplicationDeploymentWatch {
+function Add-SCCMDeploymentWatch {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory,
@@ -106,12 +107,11 @@ function Add-SCCMApplicationDeploymentWatch {
     )
 
     # get the list of currently watched apps
-    [System.Collections.ArrayList]$currentApps = @()
-    $currentApps.Add((Get-SCCMApplicationDeploymentWatchList -ErrorAction SilentlyContinue))
+    $currentApps = Get-SCCMDeploymentWatchList -ErrorAction SilentlyContinue
     Write-Verbose -Message "currently watching $($currentApps.Count)"
 
-    # add the requested new apps
-    $currentApps.Add($Name)
+    # add the requested new apps (toss the index [int] returned)
+    $Name | ForEach-Object -Process { $currentApps.Add($_) | Out-Null }
 
     # remove any duplicate entries
     $currentApps = $currentApps | Sort-Object -Unique
@@ -140,7 +140,7 @@ PS C:\> Remove-SCCMApplicationDeploymentWatch -Application $value1
 .NOTES
 Additional information about the function.
 #>
-function Remove-SCCMApplicationDeploymentWatch {
+function Remove-SCCMDeploymentWatch {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory,
@@ -150,16 +150,11 @@ function Remove-SCCMApplicationDeploymentWatch {
     )
 
     # get the list of currently watched apps
-    [System.Collections.ArrayList]$currentApps = @()
-    $currentApps.Add((Get-SCCMApplicationDeploymentWatchList -ErrorAction Stop))
+    $currentApps = Get-SCCMDeploymentWatchList -ErrorAction Stop
     Write-Verbose -Message "currently watching $($currentApps.Count)"
 
-    foreach ($application in $Name) {
-
-        Write-Verbose -Message "attempting to remove $application (if present)"
-        $currentApps.Remove($application)
-
-    }
+    # remove each specified app, no error thrown if not present so don't bother checking
+    $Name | ForEach-Object -Process { $currentApps.Remove($_) }
 
     Write-Verbose -Message "now watching $($currentApps.Count)"
     Set-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat -Value $currentApps
@@ -183,90 +178,71 @@ PS C:\> Show-SCCM-ApplicationDeploymentWatch
 .NOTES
 Additional information about the function.
 #>
-function Get-SCCMApplicationDeploymentWatch {
+function Get-SCCMDeploymentWatch {
     [CmdletBinding()]
     param (
-        [string[]]$Application,
+        [string]$Name,
         [Alias('OPD')]
         [switch]$OnlyPhasedDeployments = $true,
         [Alias('SAU')]
-        [switch]$SuppressAllUsers = $true,
-        [switch]$Sorted
+        [switch]$SuppressAllUsers = $true
     )
-
-    # load the list of applications we are interested in seeing deployments for
-    [System.Collections.ArrayList]$currentApps += Get-SCCMApplicationDeploymentWatchList -ErrorAction Stop
-    Write-Verbose -Message "currently watching $($currentApps.Count)"
-
-    if ($Sorted) {
-
-        $currentApps = $currentApps | Sort-Object
-
-    }
-
-    $results = [ordered]@{}
 
     # save current working location so we can run the CM commands on PRI
     Push-Location
     Set-Location -Path PRI:
 
-    foreach ($app in $currentApps) {
+    $deployments = Get-CMDeployment -SoftwareName $Name
 
-        $deployments = Get-CMDeployment -SoftwareName $app
+    if (-not $deployments) {
 
-        if (-not $deployments) {
+        Write-Verbose -Message "no deployments for $Name or no such app"
+        break
 
-            Write-Verbose -Message "no deployments for $app or no such app"
+    }
+
+    $deploymentStats = @()
+
+    foreach ($deployment in $deployments) {
+
+        if ($SuppressAllUsers -and ($deployment.CollectionName -like "")) {
+
+            Write-Verbose -Message "suppressing 'All Users' collection"
             continue
 
         }
 
-        $deploymentStats = @()
+        if ($OnlyPhasedDeployments -and ($deployment.CollectionName -notmatch "Phase \d")) {
 
-        foreach ($deployment in $deployments) {
-
-            if ($SuppressAllUsers -and ($deployment.CollectionName -like "")) {
-
-                Write-Verbose -Message "suppressing 'All Users' collection"
-                continue
-
-            }
-
-            if ($OnlyPhasedDeployments -and ($deployment.CollectionName -notmatch "Phase \d")) {
-
-                Write-Verbose -Message "suppressing non-phased deployment, $($deployment.CollectionName)"
-                continue
-
-            }
-
-            $deploymentStats += New-Object -TypeName SCCMDeploymentStats(
-                $deployment.CollectionName,
-                $deployment.NumberTargeted,
-                $deployment.NumberSuccess,
-                $deployment.NumberInProgress,
-                $deployment.NumberErrors,
-                $deployment.NumberUnknown
-            )
+            Write-Verbose -Message "suppressing non-phased deployment, $($deployment.CollectionName)"
+            continue
 
         }
 
-        # create a "Total" entry of all deployments of the current app
         $deploymentStats += New-Object -TypeName SCCMDeploymentStats(
-            "Total",
-            ($deploymentStats | Measure-Object -Property Active  -Sum).Sum,
-            ($deploymentStats | Measure-Object -Property Success -Sum).Sum,
-            ($deploymentStats | Measure-Object -Property Pending -Sum).Sum,
-            ($deploymentStats | Measure-Object -Property Error   -Sum).Sum,
-            ($deploymentStats | Measure-Object -Property Unknown -Sum).Sum
+            $deployment.CollectionName,
+            $deployment.NumberTargeted,
+            $deployment.NumberSuccess,
+            $deployment.NumberInProgress,
+            $deployment.NumberErrors,
+            $deployment.NumberUnknown
         )
-
-        $results.Add($app, $deploymentStats)
 
     }
 
+    # create a "Total" entry of all deployments of the current app
+    $deploymentStats += New-Object -TypeName SCCMDeploymentStats(
+        "Total",
+        ($deploymentStats | Measure-Object -Property Active  -Sum).Sum,
+        ($deploymentStats | Measure-Object -Property Success -Sum).Sum,
+        ($deploymentStats | Measure-Object -Property Pending -Sum).Sum,
+        ($deploymentStats | Measure-Object -Property Error   -Sum).Sum,
+        ($deploymentStats | Measure-Object -Property Unknown -Sum).Sum
+    )
+
     Pop-Location
 
-    Write-Output -InputObject $results
+    Write-Output -InputObject $deploymentStats
 
 }
 
@@ -282,27 +258,29 @@ PS C:\> Show-SCCMApplicationDeploymentWatch
 The use of Write-Host is acceptable here because this is a 'Show' function whose sole purpose is to neatly display
 output in the console window.
 #>
-function Show-SCCMApplicationDeploymentWatch {
+function Show-SCCMDeploymentWatch {
     [CmdletBinding()]
     param (
-        [string[]]$Application = (Get-SCCMApplicationDeploymentWatchList)
+        [Alias('DeploymentName')]
+        [string[]]$Name = (Get-SCCMDeploymentWatchList)
     )
 
-    $applications = Get-SCCMApplicationDeploymentWatch
-    $bufferWidth  = (Get-Host).UI.RawUI.BufferSize.Width
-    $dateString   = "[$(Get-Date)]"
+    $bufferWidth = (Get-Host).UI.RawUI.BufferSize.Width
+    $dateString  = "[$(Get-Date)]"
 
     Write-Host ("-" * 10) -ForegroundColor Yellow -BackgroundColor Green -NoNewline
     Write-Host "$dateString" -ForegroundColor Blue -BackgroundColor Green -NoNewline
     Write-Host ("-" * ($bufferWidth - (10 + $dateString.Length))) -ForegroundColor Yellow -BackgroundColor Green
 
-    foreach ($application in $applications.GetEnumerator()) {
+    foreach ($deployment in $Name) {
+
+        $deploymentStats = Get-SCCMDeploymentWatch -Name $deployment
 
         Write-Host ("-" * 5) -ForegroundColor Yellow -BackgroundColor Green -NoNewline
-        Write-Host $application.Key -ForegroundColor Blue -BackgroundColor Green -NoNewline
-        Write-Host ("-" * ($bufferWidth - (5 + $application.Key.Length))) -ForegroundColor Yellow -BackgroundColor Green
+        Write-Host $deployment -ForegroundColor Blue -BackgroundColor Green -NoNewline
+        Write-Host ("-" * ($bufferWidth - (5 + $deployment.Length))) -ForegroundColor Yellow -BackgroundColor Green
 
-        $application.Value | Format-Table
+        $deploymentStats | Format-Table
 
     }
 
@@ -311,8 +289,8 @@ function Show-SCCMApplicationDeploymentWatch {
 # automatically load format data when module is imported
 Update-FormatData -AppendPath (Join-Path $psscriptroot "*.ps1xml")
 
-Export-ModuleMember -Function Get-SCCMApplicationDeploymentWatchList
-Export-ModuleMember -Function Add-SCCMApplicationDeploymentWatch
-Export-ModuleMember -Function Remove-SCCMApplicationDeploymentWatch
-Export-ModuleMember -Function Get-SCCMApplicationDeploymentWatch
-Export-ModuleMember -Function Show-SCCMApplicationDeploymentWatch
+Export-ModuleMember -Function Get-SCCMDeploymentWatchList
+Export-ModuleMember -Function Add-SCCMDeploymentWatch
+Export-ModuleMember -Function Remove-SCCMDeploymentWatch
+Export-ModuleMember -Function Get-SCCMDeploymentWatch
+Export-ModuleMember -Function Show-SCCMDeploymentWatch
