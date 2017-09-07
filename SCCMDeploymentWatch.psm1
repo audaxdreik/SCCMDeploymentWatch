@@ -1,10 +1,10 @@
 ﻿<#
 .NOTES
-===================================================================================================================
+=======================================================================================================================
     Created on:    5/22/2017 10:06 AM
     Created by:    audax dreik
     Filename:      SCCMDeploymentWatch.psm1
-===================================================================================================================
+=======================================================================================================================
 .DESCRIPTION
 Easy monitoring of ongoing SCCM deployments.
 #>
@@ -67,6 +67,7 @@ or Software Update Groups you are currently watching.
 .EXAMPLE
 PS C:\> Get-SCCMApplicationDeploymentWatch
 
+Returns an array of the contents of SCCMWatch.dat which can be fed into some of the other functions.
 .NOTES
 Just a simple wrapper/helper function.
 #>
@@ -86,10 +87,10 @@ Adds a new SCCM Application or Software Update Group for which to monitor deploy
 Takes the name(s) of an SCCM Application or Software Update Group and adds it to the SCCMWatch.dat file located in your
 $env:USERPROFILE\Documents\WindowsPowerShell folder if they are not already present. Get-SCCMApplicationDeploymentWatch
 will reference these entries when querying deployments.
-.PARAMETER Application
-Can be an Application or a Software Update Group.
+.PARAMETER Name
+The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
-PS C:\> Add-SCCMApplicationDeploymentWatch -Application "WKS - Java 8 Update 131"
+PS C:\> Add-SCCMApplicationDeploymentWatch -Application 'WKS - Java 8 Update 131'
 
 .NOTES
 Non-valid Applications or Software Update Groups do not cause any actual harm but should eventually be handled
@@ -97,44 +98,28 @@ as they can increase query time.
 #>
 function Add-SCCMApplicationDeploymentWatch {
     [CmdletBinding()]
-    param
-    (
+    param (
         [Parameter(Mandatory,
-                   Position = 0)]
-        [string[]]$Application
+            Position = 0)]
+        [Alias('ApplicationName')]
+        [string[]]$Name
     )
 
+    # get the list of currently watched apps
     [System.Collections.ArrayList]$currentApps = @()
+    $currentApps.Add((Get-SCCMApplicationDeploymentWatchList -ErrorAction SilentlyContinue))
+    Write-Verbose -Message "currently watching $($currentApps.Count)"
 
-    try {
+    # add the requested new apps
+    $currentApps.Add($Name)
 
-        $currentApps += Get-Content $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat -ErrorAction Stop
-        Write-Verbose -Message "currently watching $($currentApps.Count)"
+    # remove any duplicate entries
+    $currentApps = $currentApps | Sort-Object -Unique
 
-    } catch [System.Management.Automation.ItemNotFoundException]{
-
-        Write-Verbose -Message "$env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat does not exist"
-
-    }
-
+    <# TODO: add logic to determine if each app is valid
     foreach ($app in $Application) {
-
-        if ($app -notin $currentApps) {
-
-            <#
-                TODO:
-                add logic here to validate if the thing you're adding is a valid application or software update group
-            #>
-            Write-Verbose -Message "adding $app"
-            $currentApps += $app
-
-        } else {
-
-            Write-Verbose -Message "$app already being watched"
-
-        }
-
     }
+    #>
 
     Write-Verbose -Message "now watching $($currentApps.Count)"
     Set-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat -Value $currentApps
@@ -142,48 +127,37 @@ function Add-SCCMApplicationDeploymentWatch {
 }
 
 <#
-    .SYNOPSIS
-        Removes a currently watched SCCM Application or Software Update Group.
+.SYNOPSIS
+Removes a currently watched SCCM Application or Software Update Group.
+.DESCRIPTION
+Will remove the name(s) of the provided application(s) or software update group(s) from
+C:\Users\[USERNAME\Documents\WindowsPowerShell\SCCMWatch.dat if it is already present.
+.PARAMETER Application
+A description of the Application parameter.
+.EXAMPLE
+PS C:\> Remove-SCCMApplicationDeploymentWatch -Application $value1
 
-    .DESCRIPTION
-        Will remove the name(s) of the provided application(s) or software update group(s) from
-        C:\Users\[USERNAME\Documents\WindowsPowerShell\SCCMWatch.dat if it is already present.
-
-    .PARAMETER Application
-        A description of the Application parameter.
-
-    .EXAMPLE
-        PS C:\> Remove-SCCMApplicationDeploymentWatch -Application $value1
-
-    .NOTES
-        Additional information about the function.
+.NOTES
+Additional information about the function.
 #>
 function Remove-SCCMApplicationDeploymentWatch {
     [CmdletBinding()]
-    param
-    (
+    param (
         [Parameter(Mandatory,
-                   Position = 0)]
-        [string[]]$Application
+            Position = 0)]
+        [Alias('ApplicationName')]
+        [string[]]$Name
     )
 
+    # get the list of currently watched apps
     [System.Collections.ArrayList]$currentApps = @()
+    $currentApps.Add((Get-SCCMApplicationDeploymentWatchList -ErrorAction Stop))
+    Write-Verbose -Message "currently watching $($currentApps.Count)"
 
-    try {
+    foreach ($application in $Name) {
 
-        $currentApps += Get-Content $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat -ErrorAction Stop
-        Write-Verbose -Message "currently watching $($currentApps.Count)"
-
-    } catch [System.Management.Automation.ItemNotFoundException]{
-
-        Write-Verbose -Message "$env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat does not exist"
-
-    }
-
-    foreach ($app in $Application) {
-
-        Write-Verbose -Message "attempting to remove $app (if present)"
-        $currentApps.Remove($app)
+        Write-Verbose -Message "attempting to remove $application (if present)"
+        $currentApps.Remove($application)
 
     }
 
@@ -193,33 +167,26 @@ function Remove-SCCMApplicationDeploymentWatch {
 }
 
 <#
-    .SYNOPSIS
-        Shows the status of all currently watched Application and Software Update Group deployments.
-
-    .DESCRIPTION
-        Gets the content from C:\Users\[USERNAME]\Documents\WindowsPowerShell\SCCMWatch.dat and formats the output of
-        each Get-CMDeployment query into a table.
-
-    .PARAMETER OnlyPhasedDeployments
-        Will return only the deployments for our phased collections. Good for reporting compliance.
-
-    .PARAMETER SuppressAllUsers
-        Suppresses displaying any deployments to the "All Users" collection. Good for reporting compliance.
-
-    .PARAMETER Sorted
-        Sort output alphabetically instead of "as-is" from SCCMWatch.dat
-
-    .EXAMPLE
-        PS C:\> Show-SCCM-ApplicationDeploymentWatch
-
-    .NOTES
-        Additional information about the function.
+.SYNOPSIS
+Shows the status of all currently watched Application and Software Update Group deployments.
+.DESCRIPTION
+Gets the content from C:\Users\[USERNAME]\Documents\WindowsPowerShell\SCCMWatch.dat and formats the output of
+each Get-CMDeployment query into a table.
+.PARAMETER OnlyPhasedDeployments
+Will return only the deployments for our phased collections. Good for reporting compliance.
+.PARAMETER SuppressAllUsers
+Suppresses displaying any deployments to the "All Users" collection. Good for reporting compliance.
+.PARAMETER Sorted
+Sort output alphabetically instead of "as-is" from SCCMWatch.dat
+.EXAMPLE
+PS C:\> Show-SCCM-ApplicationDeploymentWatch
+.NOTES
+Additional information about the function.
 #>
 function Get-SCCMApplicationDeploymentWatch {
     [CmdletBinding()]
-    param
-    (
-        [string[]]$Application = (Get-SCCMApplicationDeploymentWatchList),
+    param (
+        [string[]]$Application,
         [Alias('OPD')]
         [switch]$OnlyPhasedDeployments = $true,
         [Alias('SAU')]
@@ -237,7 +204,7 @@ function Get-SCCMApplicationDeploymentWatch {
 
     }
 
-    $results = [ordered]@{ }
+    $results = [ordered]@{}
 
     # save current working location so we can run the CM commands on PRI
     Push-Location
@@ -317,7 +284,9 @@ output in the console window.
 #>
 function Show-SCCMApplicationDeploymentWatch {
     [CmdletBinding()]
-    param ()
+    param (
+        [string[]]$Application = (Get-SCCMApplicationDeploymentWatchList)
+    )
 
     $applications = Get-SCCMApplicationDeploymentWatch
     $bufferWidth  = (Get-Host).UI.RawUI.BufferSize.Width
