@@ -15,7 +15,7 @@ class SCCMDeploymentStats {
     [int]$Active
     [int]$Success
     [int]$Pending
-    [int]$Error
+    [int]$Errors
     [int]$Unknown
     [double]$Compliance
     [int]$LowerThreshold
@@ -24,12 +24,12 @@ class SCCMDeploymentStats {
     # Constructors
     SCCMDeploymentStats () { }
 
-    SCCMDeploymentStats ([string]$CollectionName, [int]$Active, [int]$Success, [int]$Pending, [int]$Error, [int]$Unknown) {
+    SCCMDeploymentStats ([string]$CollectionName, [int]$Active, [int]$Success, [int]$Pending, [int]$Errors, [int]$Unknown) {
         $this.CollectionName = $CollectionName
         $this.Active         = $Active
         $this.Success        = $Success
         $this.Pending        = $Pending
-        $this.Error          = $Error
+        $this.Error          = $Errors
         $this.Unknown        = $Unknown
         $this.Compliance     = [System.Math]::Round(($Success / $Active) * 100, 2)
 
@@ -89,9 +89,9 @@ reference these entries when querying deployments.
 .PARAMETER Name
 The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
-PS C:\> Add-SCCMApplicationDeploymentWatch -Name 'WKS - Java 8 Update 131'
+PS C:\> Add-SCCMApplicationDeploymentWatch -Name 'Java 8 Update 131'
 
-Adds the 'WKS - Java 8 Update 131' Application to SCCMWatch.dat if it is not already present.
+Adds the 'Java 8 Update 131' Application to SCCMWatch.dat if it is not already present.
 .NOTES
 Non-valid Applications or Software Update Groups do not cause any actual harm but should eventually be handled as they
 can increase query time.
@@ -201,10 +201,9 @@ Gets the content from C:\Users\[USERNAME]\Documents\WindowsPowerShell\SCCMWatch.
 each Get-CMDeployment query into a table.
 .PARAMETER OnlyPhasedDeployments
 Will return only the deployments for our phased collections. Good for reporting compliance.
-.PARAMETER SuppressAllUsers
-Suppresses displaying any deployments to the "All Users" collection. Good for reporting compliance.
-.PARAMETER Sorted
-Sort output alphabetically instead of "as-is" from SCCMWatch.dat
+.PARAMETER ShowAllUsers
+Includes Available deployments to the 'All Users' collection. Usually omitted for better compliance reporting on
+Required deployments.
 .EXAMPLE
 PS C:\> Show-SCCM-ApplicationDeploymentWatch
 .NOTES
@@ -212,6 +211,7 @@ Additional information about the function.
 #>
 function Get-SCCMDeploymentWatch {
     [CmdletBinding()]
+    [OutputType([SCCMDeploymentStats[]])]
     param (
         [Parameter(Mandatory,
             ValueFromPipeline,
@@ -287,7 +287,7 @@ function Get-SCCMDeploymentWatch {
             ($deploymentStats | Measure-Object -Property Active  -Sum).Sum,
             ($deploymentStats | Measure-Object -Property Success -Sum).Sum,
             ($deploymentStats | Measure-Object -Property Pending -Sum).Sum,
-            ($deploymentStats | Measure-Object -Property Error   -Sum).Sum,
+            ($deploymentStats | Measure-Object -Property Errors  -Sum).Sum,
             ($deploymentStats | Measure-Object -Property Unknown -Sum).Sum
         )
 

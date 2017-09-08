@@ -68,7 +68,7 @@
                                 <PropertyName>Pending</PropertyName>
                             </TableColumnItem>
                             <TableColumnItem>
-                                <PropertyName>Error</PropertyName>
+                                <PropertyName>Errors</PropertyName>
                             </TableColumnItem>
                             <TableColumnItem>
                                 <PropertyName>Unknown</PropertyName>
