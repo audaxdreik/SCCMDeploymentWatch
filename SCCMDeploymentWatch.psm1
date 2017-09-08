@@ -60,23 +60,22 @@ class SCCMDeploymentStats {
 
 <#
 .SYNOPSIS
-Returns an array of strings for the currently watched SCCM deployments.
+Returns the string or array of strings for currently watched SCCM deployments.
 .DESCRIPTION
 Gets the contents of C:\Users\[USERNAME]\Documents\WindowsPowerShell\SCCMWatch.dat indicating all of the Applications
 or Software Update Groups you are currently watching.
 .EXAMPLE
 PS C:\> Get-SCCMApplicationDeploymentWatch
 
-Returns the contents of SCCMWatch.dat which can be fed into some of the other functions.
+Returns a string or array of strings generated from SCCMWatch.dat which can be fed into some of the other functions.
 .NOTES
 Just a simple wrapper/helper function.
 #>
 function Get-SCCMDeploymentWatchList {
     [CmdletBinding()]
-    [OutputType([System.Collections.ArrayList])]
     param ()
 
-    , [System.Collections.ArrayList]@(Get-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat)
+    Get-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat
 
 }
 
@@ -85,17 +84,17 @@ function Get-SCCMDeploymentWatchList {
 Adds a new SCCM Application or Software Update Group for which to monitor deployments.
 .DESCRIPTION
 Takes the name(s) of an SCCM Application or Software Update Group and adds it to the SCCMWatch.dat file located in your
-$env:USERPROFILE\Documents\WindowsPowerShell folder if they are not already present. Get-SCCMApplicationDeploymentWatch
-will reference these entries when querying deployments.
+$env:USERPROFILE\Documents\WindowsPowerShell folder if they are not already present. Get-SCCMDeploymentWatch will
+reference these entries when querying deployments.
 .PARAMETER Name
 The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
-PS C:\> Add-SCCMApplicationDeploymentWatch -Application 'WKS - Java 8 Update 131'
+PS C:\> Add-SCCMApplicationDeploymentWatch -Name 'WKS - Java 8 Update 131'
 
-
+Adds the 'WKS - Java 8 Update 131' Application to SCCMWatch.dat if it is not already present.
 .NOTES
-Non-valid Applications or Software Update Groups do not cause any actual harm but should eventually be handled
-as they can increase query time.
+Non-valid Applications or Software Update Groups do not cause any actual harm but should eventually be handled as they
+can increase query time.
 #>
 function Add-SCCMDeploymentWatchList {
     [CmdletBinding()]
@@ -111,7 +110,9 @@ function Add-SCCMDeploymentWatchList {
     begin {
 
         # get the list of currently watched apps
-        $currentApps = Get-SCCMDeploymentWatchList -ErrorAction SilentlyContinue
+        [System.Collections.ArrayList]$currentApps = @()
+        Get-SCCMDeploymentWatchList -ErrorAction SilentlyContinue |
+            ForEach-Object -Process { $currentApps.Add($_) | Out-Null}
         Write-Verbose -Message "currently watching $($currentApps.Count)"
 
     }
@@ -130,8 +131,8 @@ function Add-SCCMDeploymentWatchList {
 
     end {
 
-        # remove any duplicate entries
-        $currentApps = $currentApps | Sort-Object -Unique
+        # remove duplicate entries, ensure array returned on single entry to avoid casting error
+        $currentApps = @($currentApps | Sort-Object -Unique)
 
         Write-Verbose -Message "now watching $($currentApps.Count)"
         Set-Content -Path $env:USERPROFILE\Documents\WindowsPowerShell\SCCMWatch.dat -Value $currentApps
@@ -144,15 +145,16 @@ function Add-SCCMDeploymentWatchList {
 .SYNOPSIS
 Removes a currently watched SCCM Application or Software Update Group.
 .DESCRIPTION
-Will remove the name(s) of the provided application(s) or software update group(s) from
+Will remove the name(s) of the provided Application or Software Update Group from
 C:\Users\[USERNAME\Documents\WindowsPowerShell\SCCMWatch.dat if it is already present.
-.PARAMETER Application
-A description of the Application parameter.
+.PARAMETER Name
+The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
-PS C:\> Remove-SCCMApplicationDeploymentWatch -Application $value1
+PS C:\> Remove-SCCMApplicationDeploymentWatch -Name 'Adobe Flash','Adobe Reader DC'
 
+Removes 'Adobe Flash' and 'Adobe Reader DC' from SCCMWatch.dat if they are present.
 .NOTES
-Additional information about the function.
+Attempting to remove an Application or Software Update Group that isn't present in the file will not result in errors.
 #>
 function Remove-SCCMDeploymentWatchList {
     [CmdletBinding()]
@@ -168,7 +170,9 @@ function Remove-SCCMDeploymentWatchList {
     begin {
 
         # get the list of currently watched apps
-        $currentApps = Get-SCCMDeploymentWatchList -ErrorAction Stop
+        [System.Collections.ArrayList]$currentApps = @()
+        Get-SCCMDeploymentWatchList -ErrorAction Stop |
+            ForEach-Object -Process { $currentApps.Add($_) | Out-Null}
         Write-Verbose -Message "currently watching $($currentApps.Count)"
 
     }
@@ -277,9 +281,9 @@ function Get-SCCMDeploymentWatch {
 
     end {
 
-        # create a "Total" entry of all deployments of the current app
+        # create a 'Total' entry of all deployments of the current app
         $deploymentStats += New-Object -TypeName SCCMDeploymentStats(
-            "Total",
+            'Total',
             ($deploymentStats | Measure-Object -Property Active  -Sum).Sum,
             ($deploymentStats | Measure-Object -Property Success -Sum).Sum,
             ($deploymentStats | Measure-Object -Property Pending -Sum).Sum,
@@ -297,12 +301,21 @@ function Get-SCCMDeploymentWatch {
 
 <#
 .SYNOPSIS
-Neatly displays the output for your list of watched applications and software update groups.
+Neatly displays the output for your list of watched Applications and Software Update Groups.
 .DESCRIPTION
-Blah blah blah
+Outputs a header with timestamp to show when the command was last run, along with the name of each Application or
+Software Update Group above each set of results to make the current status of each deployment clearly identifiable.
+.PARAMETER Name
+The name or array of names for an Application or a Software Update Group.
 .EXAMPLE
 PS C:\> Show-SCCMApplicationDeploymentWatch
 
+Automatically passes the watched Applications or Software Update Groups from the SCCMWatch.dat file into the
+Get-SCCMDeploymentWatch commandlet.
+.EXAMPLE
+PS C:\> Show-SCCMApplicationDeploymentWatch -Name 'Cisco AnyConnect VPN'
+
+Shows the status of all current deployments for the 'Cisco AnyConnect VPN' application.
 .NOTES
 The use of Write-Host is acceptable here because this is a 'Show' function whose sole purpose is to neatly display
 output in the console window.
@@ -348,7 +361,7 @@ function Show-SCCMDeploymentWatch {
 }
 
 # automatically load format data when module is imported
-Update-FormatData -AppendPath (Join-Path $PSScriptRoot "*.ps1xml")
+Update-FormatData -AppendPath (Join-Path $PSScriptRoot '*.ps1xml')
 
 Export-ModuleMember -Function Get-SCCMDeploymentWatchList
 Export-ModuleMember -Function Add-SCCMDeploymentWatchList
